@@ -123,6 +123,22 @@ ok, _ = rec.verify()                       # still valid across the rotation
 
 Rotation isn't just "start using a new key." `rotate_key` writes a **`key_rotation` entry signed by the *outgoing* key** that names the incoming public key. Verification then enforces **continuity**: a new signing key is accepted only if the previous (already-authorized) key introduced it. An attacker who appends entries with their own key produces individually valid-looking signatures — but the chain rejects the key because nothing authorized it. That's the difference between "each entry is signed" and "the whole history descends from one root of trust."
 
+## Real-time forwarding (SIEM / syslog)
+
+The evidence bundle is the after-the-fact artifact; **sinks** are the live feed. Attach one and every directive, outcome, and key rotation is pushed to your SIEM, syslog, or an HTTP collector the moment it's recorded — so detection and alerting see it in real time, with an independent copy outside the ledger's own database:
+
+```python
+from agentledger import Recorder, JSONLinesSink, SyslogSink, HttpSink
+
+rec = Recorder(sinks=[
+    JSONLinesSink("/var/log/agentledger.jsonl"),          # append-only file feed
+    SyslogSink(address=("siem.internal", 514)),           # to a collector
+    HttpSink("https://splunk.internal/services/collector"),# Splunk HEC / webhook
+])
+```
+
+Sinks are best-effort and isolated: a flaky collector can never block or break the recording of a signed entry — the ledger stays the source of truth.
+
 ## Composition
 
 `agentledger` records and proves; it doesn't try to be your whole governance doctrine. Point its policy gate at [`sentinel-policy`](https://github.com/cognis-digital/sentinel-policy) for a full rule set, and feed directives in front of agents on any framework.
@@ -131,11 +147,11 @@ Rotation isn't just "start using a new key." `rotate_key` writes a **`key_rotati
 
 ```bash
 pip install -e ".[dev]"
-pytest -q          # 35 tests
+pytest -q          # 40 tests
 ```
 
 ## License
 
 Apache-2.0. © Cognis Digital.
 
-> Status: v0.1 — runnable and tested. Shipped: post-quantum ML-DSA-65 signing, hybrid Ed25519+ML-DSA signatures, persistent keys, key rotation with continuity proofs, and a CLI. Roadmap: an append-only syslog/SIEM sink and threshold (m-of-n) operator approval.
+> Status: v0.1 — runnable and tested. Shipped: post-quantum ML-DSA-65 signing, hybrid Ed25519+ML-DSA signatures, persistent keys, key rotation with continuity proofs, real-time SIEM/syslog/HTTP sinks, and a CLI. Roadmap: threshold (m-of-n) operator approval.

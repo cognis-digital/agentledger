@@ -22,6 +22,7 @@ from dataclasses import dataclass
 from typing import Iterator, Optional
 
 from .signing import Signer, Verifier, verifier_for
+from .sinks import Sink, SinkDispatcher
 
 GENESIS = "0" * 64
 
@@ -69,8 +70,10 @@ class Entry:
 
 
 class Ledger:
-    def __init__(self, signer: Signer, db_path: str = ":memory:"):
+    def __init__(self, signer: Signer, db_path: str = ":memory:",
+                 sinks: Optional[list[Sink]] = None):
         self.signer = signer
+        self.sinks = SinkDispatcher(sinks)
         self.conn = sqlite3.connect(db_path)
         self.conn.execute(
             """
@@ -121,8 +124,11 @@ class Ledger:
              ref, prev_hash, entry_hash, self.signer.algorithm, public_key, signature),
         )
         self.conn.commit()
-        return self._row(self.conn.execute(
+        entry = self._row(self.conn.execute(
             "SELECT * FROM entries WHERE seq=?", (seq,)).fetchone())
+        # real-time fan-out to SIEM/syslog/HTTP sinks (best-effort, isolated)
+        self.sinks.emit(entry.as_dict())
+        return entry
 
     @staticmethod
     def _row(r) -> Entry:

@@ -21,14 +21,16 @@ from . import evidence
 from .ledger import Entry, Ledger
 from .policy import Decision, PolicyGate
 from .signing import Signer, new_signer
+from .sinks import Sink
 
 
 class Recorder:
     def __init__(self, gate: Optional[PolicyGate] = None,
-                 signer: Optional[Signer] = None, db_path: str = ":memory:"):
+                 signer: Optional[Signer] = None, db_path: str = ":memory:",
+                 sinks: Optional[list[Sink]] = None):
         self.gate = gate or PolicyGate()
         self.signer = signer or new_signer()
-        self.ledger = Ledger(self.signer, db_path)
+        self.ledger = Ledger(self.signer, db_path, sinks=sinks)
 
     def submit(self, actor: str, action: str, params: Optional[dict] = None) -> Tuple[Decision, Entry]:
         """Evaluate a directive against the policy gate and record it (signed)."""
