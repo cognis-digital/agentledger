@@ -10,7 +10,7 @@ readme = "README.md"
 requires-python = ">=3.9"
 license = { text = "Apache-2.0" }
 authors = [{ name = "Cognis Digital" }]
-keywords = ["ai-agents", "governance", "audit", "ed25519", "tamper-evident", "compliance", "provenance"]
+keywords = ["ai-agents", "governance", "audit", "ed25519", "ml-dsa", "post-quantum", "fips-204", "tamper-evident", "compliance", "provenance"]
 classifiers = [
   "Programming Language :: Python :: 3",
   "License :: OSI Approved :: Apache Software License",

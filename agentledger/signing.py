@@ -25,6 +25,16 @@ try:  # real asymmetric signatures when available
 except Exception:  # pragma: no cover - exercised only on minimal installs
     _HAVE_ED25519 = False
 
+try:  # post-quantum signatures (ML-DSA / FIPS 204) on newer cryptography
+    from cryptography.hazmat.primitives.asymmetric.mldsa import (
+        MLDSA65PrivateKey,
+        MLDSA65PublicKey,
+    )
+
+    _HAVE_MLDSA = True
+except Exception:  # pragma: no cover - older cryptography without PQC
+    _HAVE_MLDSA = False
+
 
 class Signer:
     """Signs messages and exposes the public material needed to verify them."""
@@ -86,6 +96,38 @@ class Ed25519Verifier(Verifier):
             return False
 
 
+# ---- ML-DSA / FIPS 204 (post-quantum) ------------------------------------
+class MLDSA65Signer(Signer):
+    algorithm = "ml-dsa-65"
+    third_party_verifiable = True
+
+    def __init__(self, private_bytes: Optional[bytes] = None):
+        if private_bytes is not None:
+            self._key = MLDSA65PrivateKey.from_private_bytes(private_bytes)
+        else:
+            self._key = MLDSA65PrivateKey.generate()
+
+    def sign(self, message: bytes) -> bytes:
+        return self._key.sign(message)
+
+    def public_bytes(self) -> bytes:
+        return self._key.public_key().public_bytes_raw()
+
+    def verifier(self) -> "Verifier":
+        return MLDSA65Verifier()
+
+
+class MLDSA65Verifier(Verifier):
+    algorithm = "ml-dsa-65"
+
+    def verify(self, message: bytes, signature: bytes, public_bytes: bytes) -> bool:
+        try:
+            MLDSA65PublicKey.from_public_bytes(public_bytes).verify(signature, message)
+            return True
+        except Exception:
+            return False
+
+
 # ---- HMAC fallback -------------------------------------------------------
 class HmacSigner(Signer):
     algorithm = "hmac-sha256"
@@ -117,11 +159,20 @@ class HmacVerifier(Verifier):
 
 
 def new_signer(prefer: str = "ed25519", **kwargs) -> Signer:
-    """Construct a signer. Falls back to HMAC if Ed25519 is unavailable."""
-    if prefer == "ed25519" and _HAVE_ED25519:
-        return Ed25519Signer(**kwargs)
-    if prefer == "ed25519" and not _HAVE_ED25519:
-        return HmacSigner(**kwargs)
+    """Construct a signer. Falls back to HMAC if the asymmetric backend is absent.
+
+    prefer:
+      "ed25519"           classical asymmetric (default)
+      "ml-dsa" / "mldsa"  post-quantum (ML-DSA-65, FIPS 204)
+      "hmac"              symmetric, standard-library only
+    """
+    if prefer == "ed25519":
+        return Ed25519Signer(**kwargs) if _HAVE_ED25519 else HmacSigner(**kwargs)
+    if prefer in ("ml-dsa", "mldsa", "ml-dsa-65", "mldsa65"):
+        if _HAVE_MLDSA:
+            return MLDSA65Signer(**kwargs)
+        raise RuntimeError(
+            "ml-dsa requires a 'cryptography' build with ML-DSA support (FIPS 204)")
     if prefer in ("hmac", "hmac-sha256"):
         return HmacSigner(**kwargs)
     raise ValueError(f"unknown signer preference: {prefer}")
@@ -133,6 +184,10 @@ def verifier_for(algorithm: str, secret: Optional[bytes] = None) -> Verifier:
         if not _HAVE_ED25519:
             raise RuntimeError("ed25519 bundle requires the 'cryptography' package to verify")
         return Ed25519Verifier()
+    if algorithm == "ml-dsa-65":
+        if not _HAVE_MLDSA:
+            raise RuntimeError("ml-dsa-65 bundle requires a 'cryptography' build with ML-DSA")
+        return MLDSA65Verifier()
     if algorithm == "hmac-sha256":
         if secret is None:
             raise RuntimeError("hmac bundle requires the signing secret to verify")
