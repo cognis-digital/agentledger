@@ -111,6 +111,30 @@ ok, _ = rec.verify()                       # still valid across the rotation
 
 Rotation isn't just "start using a new key." `rotate_key` writes a **`key_rotation` entry signed by the *outgoing* key** that names the incoming public key. Verification then enforces **continuity**: a new signing key is accepted only if the previous (already-authorized) key introduced it. An attacker who appends entries with their own key produces individually valid-looking signatures — but the chain rejects the key because nothing authorized it. That's the difference between "each entry is signed" and "the whole history descends from one root of trust."
 
+## Threshold approval (m-of-n)
+
+Some actions shouldn't ride on one person's say-so. Require **m distinct operators** to sign off before a directive counts as authorized — real multi-signature, not a checkbox:
+
+```python
+from agentledger import Recorder, load_key
+
+rec = Recorder()
+_, directive = rec.submit("alice", "deploy", {"env": "prod"})
+
+rec.approve(directive.seq, "alice", load_key("alice.key"))   # each approver signs
+rec.approve(directive.seq, "bob",   load_key("bob.key"))     # with their OWN key
+
+status = rec.approval_status(directive.seq, threshold=2)
+status.satisfied        # True — two distinct keys validly signed the directive's hash
+```
+
+Each approval is a signature over the directive's hash, so it can't be replayed onto a different action; only **distinct public keys with valid signatures** count (the same operator approving twice counts once), and an optional `allowed_keys` allowlist restricts who may approve. Every approval lands in the same signed, tamper-evident chain. From the CLI:
+
+```bash
+agentledger approve --ref 1 --approver alice --approver-key alice.key --ledger l.db --key ledger.key
+agentledger approvals --ref 1 --threshold 2 --ledger l.db          # exit 0 when satisfied
+```
+
 ## Real-time forwarding (SIEM / syslog)
 
 The evidence bundle is the after-the-fact artifact; **sinks** are the live feed. Attach one and every directive, outcome, and key rotation is pushed to your SIEM, syslog, or an HTTP collector the moment it's recorded — so detection and alerting see it in real time, with an independent copy outside the ledger's own database:
@@ -135,11 +159,11 @@ Sinks are best-effort and isolated: a flaky collector can never block or break t
 
 ```bash
 pip install -e ".[dev]"
-pytest -q          # 40 tests
+pytest -q          # 46 tests
 ```
 
 ## License
 
 Apache-2.0. © Cognis Digital.
 
-> Status: v0.1 — runnable and tested. Shipped: post-quantum ML-DSA-65 signing, hybrid Ed25519+ML-DSA signatures, persistent keys, key rotation with continuity proofs, real-time SIEM/syslog/HTTP sinks, and a CLI. Roadmap: threshold (m-of-n) operator approval.
+> Status: v0.1 — runnable and tested. Shipped: post-quantum ML-DSA-65 signing, hybrid Ed25519+ML-DSA signatures, persistent keys, key rotation with continuity proofs, threshold m-of-n approval, real-time SIEM/syslog/HTTP sinks, and a CLI.

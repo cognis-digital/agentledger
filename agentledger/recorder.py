@@ -17,11 +17,26 @@ from __future__ import annotations
 
 from typing import Optional, Tuple
 
+from dataclasses import dataclass
+
 from . import evidence
 from .ledger import Entry, Ledger
 from .policy import Decision, PolicyGate
-from .signing import Signer, new_signer
+from .signing import Signer, new_signer, verifier_for
 from .sinks import Sink
+
+
+@dataclass(frozen=True)
+class ApprovalStatus:
+    directive_seq: int
+    threshold: int
+    approver_keys: list           # distinct public keys with a valid approval signature
+    satisfied: bool
+
+    def as_dict(self) -> dict:
+        return {"directive_seq": self.directive_seq, "threshold": self.threshold,
+                "approvals": len(self.approver_keys), "satisfied": self.satisfied,
+                "approver_keys": self.approver_keys}
 
 
 class Recorder:
@@ -60,6 +75,51 @@ class Recorder:
         self.signer = new_signer
         self.ledger.signer = new_signer
         return entry
+
+    def approve(self, directive_seq: int, approver: str, signer: Signer) -> Entry:
+        """Record one operator's approval of a directive (m-of-n multi-sig).
+
+        The approver signs the directive's `entry_hash` with their *own* key; the
+        signature and public key go into an `approval` entry. Because the
+        signature is over the directive's hash, it can't be replayed onto a
+        different directive, and distinct keys count as distinct approvers.
+        """
+        target = self.ledger.get(directive_seq)
+        if target is None:
+            raise ValueError(f"no entry with seq {directive_seq}")
+        signature = signer.sign(target.entry_hash.encode("ascii")).hex()
+        detail = {
+            "approver": approver,
+            "algorithm": signer.algorithm,
+            "public_key": signer.public_bytes().hex(),
+            "signature": signature,
+            "over": target.entry_hash,
+        }
+        return self.ledger.append("approval", approver, "approve", detail, ref=directive_seq)
+
+    def approval_status(self, directive_seq: int, threshold: int,
+                        allowed_keys: Optional[set] = None) -> ApprovalStatus:
+        """Whether a directive has `threshold` distinct valid approvals.
+
+        Each approval's signature is verified against the directive's hash. Only
+        distinct public keys with a valid signature count; if `allowed_keys` is
+        given, approvals from keys outside that allowlist are ignored.
+        """
+        target = self.ledger.get(directive_seq)
+        if target is None:
+            raise ValueError(f"no entry with seq {directive_seq}")
+        valid: set = set()
+        for e in self.ledger.entries_referencing(directive_seq, kind="approval"):
+            d = e.params
+            try:
+                v = verifier_for(d["algorithm"])
+            except (RuntimeError, KeyError):
+                continue  # e.g. hmac (no third-party verification) — skip
+            ok = v.verify(target.entry_hash.encode("ascii"),
+                          bytes.fromhex(d["signature"]), bytes.fromhex(d["public_key"]))
+            if ok and (allowed_keys is None or d["public_key"] in allowed_keys):
+                valid.add(d["public_key"])
+        return ApprovalStatus(directive_seq, threshold, sorted(valid), len(valid) >= threshold)
 
     def verify(self, check_continuity: bool = True) -> Tuple[bool, Optional[int]]:
         return self.ledger.verify(check_continuity=check_continuity)

@@ -146,6 +146,19 @@ class Ledger:
     def all(self) -> list[Entry]:
         return list(self)
 
+    def get(self, seq: int) -> Optional[Entry]:
+        r = self.conn.execute("SELECT * FROM entries WHERE seq=?", (seq,)).fetchone()
+        return self._row(r) if r else None
+
+    def entries_referencing(self, seq: int, kind: Optional[str] = None) -> list[Entry]:
+        sql = "SELECT * FROM entries WHERE ref=?"
+        params: list = [seq]
+        if kind:
+            sql += " AND kind=?"
+            params.append(kind)
+        sql += " ORDER BY seq"
+        return [self._row(r) for r in self.conn.execute(sql, params)]
+
     def verify(self, verifier: Optional[Verifier] = None,
                check_continuity: bool = True) -> tuple[bool, Optional[int]]:
         """Replay hash chain + signatures (+ key continuity). Returns (ok, seq).

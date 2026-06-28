@@ -90,6 +90,23 @@ def cmd_rotate(args) -> int:
     return 0
 
 
+def cmd_approve(args) -> int:
+    rec = _recorder(args)
+    approver_signer = load_key(args.approver_key)
+    entry = rec.approve(args.ref, args.approver, approver_signer)
+    _print({"seq": entry.seq, "ref": args.ref, "approver": args.approver,
+            "approver_key": approver_signer.public_bytes().hex()})
+    return 0
+
+
+def cmd_approvals(args) -> int:
+    rec = _recorder(args)
+    allowed = set(args.allowed_key) if args.allowed_key else None
+    status = rec.approval_status(args.ref, args.threshold, allowed_keys=allowed)
+    _print(status.as_dict())
+    return 0 if status.satisfied else 1
+
+
 def cmd_verify(args) -> int:
     rec = _recorder(args)
     ok, broken = rec.verify()
@@ -151,6 +168,24 @@ def build_parser() -> argparse.ArgumentParser:
     pr.add_argument("--ledger", required=True)
     pr.add_argument("--key", required=True)
     pr.set_defaults(func=cmd_rotate)
+
+    pa = sub.add_parser("approve", help="record one operator's approval of a directive")
+    pa.add_argument("--ref", type=int, required=True, help="directive seq to approve")
+    pa.add_argument("--approver", required=True)
+    pa.add_argument("--approver-key", dest="approver_key", required=True,
+                    help="the approver's own key file")
+    pa.add_argument("--ledger", required=True)
+    pa.add_argument("--key", required=True, help="ledger signing key")
+    pa.set_defaults(func=cmd_approve)
+
+    pas = sub.add_parser("approvals", help="check m-of-n approval status of a directive")
+    pas.add_argument("--ref", type=int, required=True)
+    pas.add_argument("--threshold", type=int, required=True)
+    pas.add_argument("--allowed-key", dest="allowed_key", action="append",
+                     help="restrict to these approver public keys (hex, repeatable)")
+    pas.add_argument("--ledger", required=True)
+    pas.add_argument("--key", default=None)
+    pas.set_defaults(func=cmd_approvals)
 
     pv = sub.add_parser("verify", help="verify the ledger (chain + signatures + continuity)")
     pv.add_argument("--ledger", required=True)

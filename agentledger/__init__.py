@@ -23,12 +23,12 @@ from .signing import (
 )
 from .policy import Decision, PolicyGate
 from .ledger import Entry, Ledger
-from .recorder import Recorder
+from .recorder import ApprovalStatus, Recorder
 from .sinks import Sink, JSONLinesSink, CallableSink, SyslogSink, HttpSink
 
 __version__ = "0.1.0"
 __all__ = [
-    "Recorder", "Ledger", "Entry", "PolicyGate", "Decision",
+    "Recorder", "ApprovalStatus", "Ledger", "Entry", "PolicyGate", "Decision",
     "Signer", "Verifier", "new_signer", "signer_from", "save_key", "load_key",
     "Sink", "JSONLinesSink", "CallableSink", "SyslogSink", "HttpSink",
     "__version__",
