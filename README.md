@@ -2,6 +2,8 @@
 
 [![CI](https://github.com/cognis-digital/agentledger/actions/workflows/ci.yml/badge.svg)](https://github.com/cognis-digital/agentledger/actions/workflows/ci.yml)
 
+> Part of the **[Accountable AI Engineering suite](https://github.com/cognis-digital/accountable-ai-suite)** — provable governance for AI agents on infrastructure you own.
+
 **A vendor-neutral flight recorder for AI agents. Every operator directive: signed, hash-chained, policy-gated, and exportable as offline-verifiable evidence.**
 
 The hard question in production AI isn't "does the model hallucinate." It's: *an agent did something — who authorized it, and can you prove it?* That's a question for your board, your auditor, and your insurer, and most agent stacks can't answer it.
