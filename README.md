@@ -21,6 +21,18 @@ pip install -e .                  # HMAC signing, zero dependencies
 pip install -e ".[ed25519]"       # adds Ed25519 (recommended)
 ```
 
+## Command line
+
+```bash
+agentledger keygen --algorithm ed25519 --out agent.key
+agentledger submit --action deploy --actor alice --param env=prod --ledger l.db --key agent.key
+agentledger outcome --ref 1 --actor agent:deployer --status success --ledger l.db --key agent.key
+agentledger rotate --algorithm hybrid --out new.key --ledger l.db --key agent.key   # upgrade to PQC
+agentledger verify --ledger l.db                       # chain + signatures + continuity
+agentledger export --ledger l.db --out evidence.json
+agentledger verify-bundle evidence.json                # offline, no key needed for ed25519/ml-dsa/hybrid
+```
+
 ## Use it around any agent
 
 ```python
@@ -117,11 +129,11 @@ Rotation isn't just "start using a new key." `rotate_key` writes a **`key_rotati
 
 ```bash
 pip install -e ".[dev]"
-pytest -q          # 33 tests
+pytest -q          # 35 tests
 ```
 
 ## License
 
 Apache-2.0. © Cognis Digital.
 
-> Status: v0.1 — runnable and tested. Shipped: post-quantum ML-DSA-65 signing, hybrid Ed25519+ML-DSA signatures, persistent keys, and key rotation with continuity proofs. Roadmap: an append-only syslog/SIEM sink, threshold (m-of-n) operator approval, and a CLI.
+> Status: v0.1 — runnable and tested. Shipped: post-quantum ML-DSA-65 signing, hybrid Ed25519+ML-DSA signatures, persistent keys, key rotation with continuity proofs, and a CLI. Roadmap: an append-only syslog/SIEM sink and threshold (m-of-n) operator approval.
