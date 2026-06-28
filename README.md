@@ -6,9 +6,13 @@
 
 **A vendor-neutral flight recorder for AI agents. Every operator directive: signed, hash-chained, policy-gated, and exportable as offline-verifiable evidence.**
 
-The hard question in production AI isn't "does the model hallucinate." It's: *an agent did something — who authorized it, and can you prove it?* That's a question for your board, your auditor, and your insurer, and most agent stacks can't answer it.
+Ask yourself:
 
-`agentledger` answers it for **any** agent framework. It sits in front of your agents and writes down what happened, in a form that can't be quietly rewritten:
+- When an agent took an action, can you say **who authorized it** — and prove it to an auditor **months later, offline**?
+- If someone edited your audit log, would you **know** — or just hope?
+- Will the signatures protecting that record still hold up **after quantum computers** arrive?
+
+The hard question in production AI was never "does the model hallucinate." It's *an agent did something — who authorized it, and can you prove it?* — a question for your board, your auditor, and your insurer, and most agent stacks can't answer it. `agentledger` answers it for **any** agent framework, writing down what happened in a form that can't be quietly rewritten:
 
 - **Signed directives.** Every operator instruction is signed — **Ed25519** (asymmetric, anyone can verify origin), **HMAC-SHA256** on the standard library alone, or **post-quantum ML-DSA-65 (FIPS 204)** when you need signatures that survive a quantum adversary.
 - **Hash-chained ledger.** Each entry commits to the previous one. Reorder, edit, or delete any entry and the chain breaks at that point — `verify()` tells you exactly where.
@@ -59,23 +63,7 @@ ok, broken = rec.verify()                       # chain + signatures
 bundle = rec.export_evidence("evidence.json")   # hand this to an auditor
 ```
 
-### See it work
-
-```bash
-python demo.py
-```
-
-```
-signing algorithm: ed25519 (third-party verifiable offline: True)
-[1] alice -> rotate-keys : default allowed=True
-[3] mallory -> deploy(prod) : no-prod-deploy allowed=False (prod deploys require change-control)
-== ledger integrity ==
-  verify() -> intact=True first_broken=None
-== evidence bundle (what you hand an auditor) ==
-  offline verify_bundle() -> True  (3 entries, head 1fdaa035807b…)
-== tamper attempt ==
-  after editing entry 2: verify_bundle() -> intact=False first_broken=2
-```
+Run `python demo.py` to watch it gate two directives, record outcomes, export an evidence bundle, verify it offline, and catch a tamper attempt end to end.
 
 ## How it fits together
 
