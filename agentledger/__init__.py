@@ -18,7 +18,9 @@ It deliberately knows nothing about how your agents run. It sits in front of
 them and writes down what happened.
 """
 
-from .signing import Signer, Verifier, new_signer
+from .signing import (
+    Signer, Verifier, new_signer, signer_from, save_key, load_key,
+)
 from .policy import Decision, PolicyGate
 from .ledger import Entry, Ledger
 from .recorder import Recorder
@@ -26,5 +28,6 @@ from .recorder import Recorder
 __version__ = "0.1.0"
 __all__ = [
     "Recorder", "Ledger", "Entry", "PolicyGate", "Decision",
-    "Signer", "Verifier", "new_signer", "__version__",
+    "Signer", "Verifier", "new_signer", "signer_from", "save_key", "load_key",
+    "__version__",
 ]

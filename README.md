@@ -89,7 +89,25 @@ rec = Recorder(gate=PolicyGate(default_allow=True), signer=new_signer(prefer="ml
 # bundle["algorithm"] == "ml-dsa-65"; verify_bundle(bundle) still works offline
 ```
 
-Available when your `cryptography` build includes ML-DSA; otherwise pick `ed25519` or `hmac`.
+Available when your `cryptography` build includes ML-DSA; otherwise pick `ed25519` or `hmac`. For a conservative migration, `new_signer(prefer="hybrid")` signs with **both Ed25519 and ML-DSA-65** — a break in either algorithm alone can't forge a directive.
+
+### Key lifecycle: persistence and rotation with continuity proofs
+
+Keys outlive processes and need to be rotated. Both are first-class:
+
+```python
+from agentledger import Recorder, new_signer, save_key, load_key
+
+save_key(signer, "agent.key");  signer = load_key("agent.key")   # persist / reload
+
+rec = Recorder(signer=load_key("agent.key"))
+rec.submit("alice", "deploy", {"env": "prod"})
+rec.rotate_key(new_signer("hybrid"))      # upgrade to post-quantum, in place
+rec.submit("alice", "deploy", {"env": "prod"})
+ok, _ = rec.verify()                       # still valid across the rotation
+```
+
+Rotation isn't just "start using a new key." `rotate_key` writes a **`key_rotation` entry signed by the *outgoing* key** that names the incoming public key. Verification then enforces **continuity**: a new signing key is accepted only if the previous (already-authorized) key introduced it. An attacker who appends entries with their own key produces individually valid-looking signatures — but the chain rejects the key because nothing authorized it. That's the difference between "each entry is signed" and "the whole history descends from one root of trust."
 
 ## Composition
 
@@ -99,11 +117,11 @@ Available when your `cryptography` build includes ML-DSA; otherwise pick `ed2551
 
 ```bash
 pip install -e ".[dev]"
-pytest -q          # 25 tests
+pytest -q          # 33 tests
 ```
 
 ## License
 
 Apache-2.0. © Cognis Digital.
 
-> Status: v0.1 — runnable and tested. Post-quantum ML-DSA-65 signing is shipped. Roadmap: persistent signing keys + key rotation with continuity proofs, hybrid (Ed25519 + ML-DSA) signatures, and an append-only syslog/SIEM sink.
+> Status: v0.1 — runnable and tested. Shipped: post-quantum ML-DSA-65 signing, hybrid Ed25519+ML-DSA signatures, persistent keys, and key rotation with continuity proofs. Roadmap: an append-only syslog/SIEM sink, threshold (m-of-n) operator approval, and a CLI.

@@ -140,26 +140,49 @@ class Ledger:
     def all(self) -> list[Entry]:
         return list(self)
 
-    def verify(self, verifier: Optional[Verifier] = None) -> tuple[bool, Optional[int]]:
-        """Replay hash chain + signatures. Returns (ok, first_broken_seq)."""
+    def verify(self, verifier: Optional[Verifier] = None,
+               check_continuity: bool = True) -> tuple[bool, Optional[int]]:
+        """Replay hash chain + signatures (+ key continuity). Returns (ok, seq).
+
+        Continuity: a per-entry signature only proves the entry is internally
+        consistent — an attacker who appends with their own key would pass that
+        check. So we also require that any change of signing key is introduced by
+        a `key_rotation` entry signed by the *previous* (authorized) key that
+        names the new public key. Without that, a new key is rejected.
+        """
+        entries = self.all()
         prev = GENESIS
-        for e in self:
+        authorized: Optional[str] = None
+        for i, e in enumerate(entries):
             if e.prev_hash != prev:
                 return False, e.seq
             if compute_hash(e.prev_hash, e.payload()) != e.entry_hash:
                 return False, e.seq
+
             v = verifier
+            sig_checkable = True
             if v is None or v.algorithm != e.algorithm:
                 try:
                     v = self._verifier_for_entry(e)
                 except RuntimeError:
                     # can't verify signature offline (e.g. hmac without secret);
-                    # the chain itself still validated above
-                    prev = e.entry_hash
-                    continue
-            if not v.verify(e.entry_hash.encode("ascii"),
-                            bytes.fromhex(e.signature), bytes.fromhex(e.public_key)):
+                    # chain + continuity below still validate
+                    sig_checkable = False
+            if sig_checkable and not v.verify(
+                    e.entry_hash.encode("ascii"),
+                    bytes.fromhex(e.signature), bytes.fromhex(e.public_key)):
                 return False, e.seq
+
+            if check_continuity:
+                if authorized is None:
+                    authorized = e.public_key
+                elif e.public_key != authorized:
+                    prev_e = entries[i - 1]
+                    if not (prev_e.kind == "key_rotation"
+                            and prev_e.params.get("new_public_key") == e.public_key):
+                        return False, e.seq
+                    authorized = e.public_key
+
             prev = e.entry_hash
         return True, None
 

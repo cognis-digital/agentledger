@@ -36,6 +36,17 @@ except Exception:  # pragma: no cover - older cryptography without PQC
     _HAVE_MLDSA = False
 
 
+def _lp(b: bytes) -> bytes:
+    """Length-prefix a byte string (4-byte big-endian length + payload)."""
+    return len(b).to_bytes(4, "big") + b
+
+
+def _unlp(data: bytes) -> tuple[bytes, bytes]:
+    """Split off one length-prefixed chunk; return (chunk, remainder)."""
+    n = int.from_bytes(data[:4], "big")
+    return data[4:4 + n], data[4 + n:]
+
+
 class Signer:
     """Signs messages and exposes the public material needed to verify them."""
 
@@ -46,6 +57,10 @@ class Signer:
         raise NotImplementedError
 
     def public_bytes(self) -> bytes:  # pragma: no cover - interface
+        raise NotImplementedError
+
+    def private_bytes(self) -> bytes:  # pragma: no cover - interface
+        """Raw private key material, for persisting and reloading the signer."""
         raise NotImplementedError
 
     def verifier(self) -> "Verifier":  # pragma: no cover - interface
@@ -81,6 +96,15 @@ class Ed25519Signer(Signer):
             format=serialization.PublicFormat.Raw,
         )
 
+    def private_bytes(self) -> bytes:
+        from cryptography.hazmat.primitives import serialization
+
+        return self._key.private_bytes(
+            encoding=serialization.Encoding.Raw,
+            format=serialization.PrivateFormat.Raw,
+            encryption_algorithm=serialization.NoEncryption(),
+        )
+
     def verifier(self) -> "Verifier":
         return Ed25519Verifier()
 
@@ -102,8 +126,9 @@ class MLDSA65Signer(Signer):
     third_party_verifiable = True
 
     def __init__(self, private_bytes: Optional[bytes] = None):
+        # ML-DSA private material is a 32-byte seed; reconstruct via from_seed_bytes
         if private_bytes is not None:
-            self._key = MLDSA65PrivateKey.from_private_bytes(private_bytes)
+            self._key = MLDSA65PrivateKey.from_seed_bytes(private_bytes)
         else:
             self._key = MLDSA65PrivateKey.generate()
 
@@ -112,6 +137,9 @@ class MLDSA65Signer(Signer):
 
     def public_bytes(self) -> bytes:
         return self._key.public_key().public_bytes_raw()
+
+    def private_bytes(self) -> bytes:
+        return self._key.private_bytes_raw()
 
     def verifier(self) -> "Verifier":
         return MLDSA65Verifier()
@@ -143,6 +171,9 @@ class HmacSigner(Signer):
         # not secret-revealing: a stable fingerprint of the key
         return hashlib.sha256(b"fpr:" + self._secret).digest()
 
+    def private_bytes(self) -> bytes:
+        return self._secret
+
     def verifier(self) -> "Verifier":
         return HmacVerifier(self._secret)
 
@@ -156,6 +187,57 @@ class HmacVerifier(Verifier):
     def verify(self, message: bytes, signature: bytes, public_bytes: bytes) -> bool:
         expected = hmac.new(self._secret, message, hashlib.sha256).digest()
         return hmac.compare_digest(expected, signature)
+
+
+# ---- Hybrid (classical + post-quantum) -----------------------------------
+class HybridSigner(Signer):
+    """Signs with Ed25519 *and* ML-DSA-65; a verifier must satisfy both.
+
+    This is the conservative migration choice: you keep a battle-tested
+    classical signature while adding post-quantum protection, so a break in
+    either algorithm alone doesn't forge a directive.
+    """
+
+    algorithm = "hybrid-ed25519-ml-dsa-65"
+    third_party_verifiable = True
+
+    def __init__(self, ed: Optional["Ed25519Signer"] = None,
+                 pq: Optional["MLDSA65Signer"] = None):
+        self.ed = ed or Ed25519Signer()
+        self.pq = pq or MLDSA65Signer()
+
+    def sign(self, message: bytes) -> bytes:
+        return _lp(self.ed.sign(message)) + _lp(self.pq.sign(message))
+
+    def public_bytes(self) -> bytes:
+        return _lp(self.ed.public_bytes()) + _lp(self.pq.public_bytes())
+
+    def private_bytes(self) -> bytes:
+        return _lp(self.ed.private_bytes()) + _lp(self.pq.private_bytes())
+
+    def verifier(self) -> "Verifier":
+        return HybridVerifier()
+
+    @classmethod
+    def from_private(cls, data: bytes) -> "HybridSigner":
+        ed_priv, rest = _unlp(data)
+        pq_priv, _ = _unlp(rest)
+        return cls(Ed25519Signer(ed_priv), MLDSA65Signer(pq_priv))
+
+
+class HybridVerifier(Verifier):
+    algorithm = "hybrid-ed25519-ml-dsa-65"
+
+    def verify(self, message: bytes, signature: bytes, public_bytes: bytes) -> bool:
+        try:
+            ed_sig, rest = _unlp(signature)
+            pq_sig, _ = _unlp(rest)
+            ed_pub, rest2 = _unlp(public_bytes)
+            pq_pub, _ = _unlp(rest2)
+        except Exception:
+            return False
+        return (Ed25519Verifier().verify(message, ed_sig, ed_pub)
+                and MLDSA65Verifier().verify(message, pq_sig, pq_pub))
 
 
 def new_signer(prefer: str = "ed25519", **kwargs) -> Signer:
@@ -173,6 +255,10 @@ def new_signer(prefer: str = "ed25519", **kwargs) -> Signer:
             return MLDSA65Signer(**kwargs)
         raise RuntimeError(
             "ml-dsa requires a 'cryptography' build with ML-DSA support (FIPS 204)")
+    if prefer == "hybrid":
+        if _HAVE_ED25519 and _HAVE_MLDSA:
+            return HybridSigner(**kwargs)
+        raise RuntimeError("hybrid requires both Ed25519 and ML-DSA support")
     if prefer in ("hmac", "hmac-sha256"):
         return HmacSigner(**kwargs)
     raise ValueError(f"unknown signer preference: {prefer}")
@@ -188,8 +274,45 @@ def verifier_for(algorithm: str, secret: Optional[bytes] = None) -> Verifier:
         if not _HAVE_MLDSA:
             raise RuntimeError("ml-dsa-65 bundle requires a 'cryptography' build with ML-DSA")
         return MLDSA65Verifier()
+    if algorithm == "hybrid-ed25519-ml-dsa-65":
+        if not (_HAVE_ED25519 and _HAVE_MLDSA):
+            raise RuntimeError("hybrid bundle requires Ed25519 and ML-DSA support")
+        return HybridVerifier()
     if algorithm == "hmac-sha256":
         if secret is None:
             raise RuntimeError("hmac bundle requires the signing secret to verify")
         return HmacVerifier(secret)
     raise ValueError(f"unknown algorithm: {algorithm}")
+
+
+def signer_from(algorithm: str, private_bytes: bytes) -> Signer:
+    """Reconstruct a signer from its algorithm name and raw private material."""
+    if algorithm == "ed25519":
+        return Ed25519Signer(private_bytes)
+    if algorithm == "ml-dsa-65":
+        return MLDSA65Signer(private_bytes)
+    if algorithm == "hybrid-ed25519-ml-dsa-65":
+        return HybridSigner.from_private(private_bytes)
+    if algorithm == "hmac-sha256":
+        return HmacSigner(private_bytes)
+    raise ValueError(f"unknown algorithm: {algorithm}")
+
+
+def save_key(signer: Signer, path: str) -> None:
+    """Persist a signer's key to disk (JSON: algorithm + hex private material).
+
+    The file contains private key material — store it with appropriate
+    filesystem permissions / secret management.
+    """
+    import json
+    with open(path, "w", encoding="utf-8") as fh:
+        json.dump({"algorithm": signer.algorithm,
+                   "private": signer.private_bytes().hex()}, fh)
+
+
+def load_key(path: str) -> Signer:
+    """Reconstruct a signer previously written with `save_key`."""
+    import json
+    with open(path, "r", encoding="utf-8") as fh:
+        data = json.load(fh)
+    return signer_from(data["algorithm"], bytes.fromhex(data["private"]))

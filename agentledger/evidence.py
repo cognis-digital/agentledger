@@ -62,7 +62,8 @@ def verify_bundle(bundle: dict, secret: Optional[bytes] = None) -> Tuple[bool, O
         verifier = None  # can't check signatures offline; chain-only
 
     prev = GENESIS
-    for d in entries:
+    authorized = None
+    for i, d in enumerate(entries):
         if d["prev_hash"] != prev:
             return False, d["seq"]
         if compute_hash(d["prev_hash"], _payload_from_dict(d)) != d["entry_hash"]:
@@ -75,6 +76,16 @@ def verify_bundle(bundle: dict, secret: Optional[bytes] = None) -> Tuple[bool, O
             )
             if not ok:
                 return False, d["seq"]
+        # key-continuity: a new signing key must be introduced by a prior
+        # key_rotation entry that names it (see Ledger.verify for rationale)
+        if authorized is None:
+            authorized = d["public_key"]
+        elif d["public_key"] != authorized:
+            prev_d = entries[i - 1]
+            if not (prev_d.get("kind") == "key_rotation"
+                    and prev_d.get("params", {}).get("new_public_key") == d["public_key"]):
+                return False, d["seq"]
+            authorized = d["public_key"]
         prev = d["entry_hash"]
 
     if bundle.get("head_hash") and entries and bundle["head_hash"] != prev:

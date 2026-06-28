@@ -43,8 +43,24 @@ class Recorder:
         """Record what happened when an agent acted on a directive."""
         return self.ledger.append("outcome", actor, status, detail or {}, ref=ref_seq)
 
-    def verify(self) -> Tuple[bool, Optional[int]]:
-        return self.ledger.verify()
+    def rotate_key(self, new_signer: Signer, actor: str = "operator") -> Entry:
+        """Rotate the signing key, leaving a continuity proof in the ledger.
+
+        The *outgoing* key signs a `key_rotation` entry that names the new
+        public key, so verification can prove the new key was authorized by the
+        old one. Subsequent entries are signed by the new key.
+        """
+        entry = self.ledger.append(
+            "key_rotation", actor, "rotate",
+            {"new_algorithm": new_signer.algorithm,
+             "new_public_key": new_signer.public_bytes().hex()},
+        )
+        self.signer = new_signer
+        self.ledger.signer = new_signer
+        return entry
+
+    def verify(self, check_continuity: bool = True) -> Tuple[bool, Optional[int]]:
+        return self.ledger.verify(check_continuity=check_continuity)
 
     def entries(self) -> list[Entry]:
         return self.ledger.all()
