@@ -67,6 +67,22 @@ Run `python demo.py` to watch it gate two directives, record outcomes, export an
 
 ## How it fits together
 
+```mermaid
+flowchart LR
+    op[Operator / agent<br/>directive] --> rec[Recorder]
+    rec --> gate{PolicyGate<br/>allow / deny}
+    gate -->|decision| led[(Ledger<br/>signed, hash-chained)]
+    sgn[Signer<br/>ed25519 / ml-dsa / hybrid / hmac] -. signs every entry .-> led
+    led --> sink[Sinks<br/>JSONL / syslog / HTTP]
+    sink --> siem[SIEM / SOC<br/>real-time]
+    led --> ev[Evidence bundle<br/>self-contained JSON]
+    ev -.verify offline.-> aud[Auditor / regulator]
+    classDef hot stroke:#f4b400,stroke-width:3px;
+    class led,sgn hot;
+```
+
+See [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) for the full data model and the hash-chain / key-continuity design.
+
 | Component | Role |
 |-----------|------|
 | **`Recorder`** | The high-level API: `submit` a directive (gated + recorded), `record_outcome`, `verify`, `export_evidence`. |
@@ -151,6 +167,22 @@ rec = Recorder(sinks=[
 
 Sinks are best-effort and isolated: a flaky collector can never block or break the recording of a signed entry — the ledger stays the source of truth.
 
+## Demos
+
+Five runnable scenarios in [`demos/`](demos/), each aimed at a different audience and using the real public API — no network, narrated output, exit 0. Full descriptions in [`docs/DEMOS.md`](docs/DEMOS.md).
+
+```bash
+python demos/run_all.py        # all five, end to end
+```
+
+| # | Demo | Audience | What it shows |
+|---|------|----------|---------------|
+| 1 | [`01_agent_flight_recorder.py`](demos/01_agent_flight_recorder.py) | AI-agent builders | Gate a directive, run the agent on allow, record the outcome — and record the denied directive too. |
+| 2 | [`02_tamper_evident_audit.py`](demos/02_tamper_evident_audit.py) | Security & compliance | Edit one row in SQLite and watch `verify()` catch it and point at the exact sequence. |
+| 3 | [`03_offline_evidence_bundle.py`](demos/03_offline_evidence_bundle.py) | Auditors / regulators | Export a bundle, verify it offline with no key and no network, then catch a single edited field. |
+| 4 | [`04_key_rotation_and_pqc.py`](demos/04_key_rotation_and_pqc.py) | Platform & security engineers | Rotate Ed25519 → post-quantum ML-DSA-65 in place; an unauthorized key is rejected by continuity. |
+| 5 | [`05_threshold_and_siem.py`](demos/05_threshold_and_siem.py) | SRE / platform ops | Require m-of-n distinct operator approvals while forwarding the feed to a SIEM sink in real time. |
+
 ## Composition
 
 `agentledger` records and proves; it doesn't try to be your whole governance doctrine. Point its policy gate at [`sentinel-policy`](https://github.com/cognis-digital/sentinel-policy) for a full rule set, and feed directives in front of agents on any framework.
@@ -159,11 +191,11 @@ Sinks are best-effort and isolated: a flaky collector can never block or break t
 
 ```bash
 pip install -e ".[dev]"
-pytest -q          # 46 tests
+pytest -q          # 52 tests
 ```
 
 ## License
 
-Apache-2.0. © Cognis Digital.
+COCL (Cognis Open Collaboration License). © Cognis Digital.
 
 > Status: v0.1 — runnable and tested. Shipped: post-quantum ML-DSA-65 signing, hybrid Ed25519+ML-DSA signatures, persistent keys, key rotation with continuity proofs, threshold m-of-n approval, real-time SIEM/syslog/HTTP sinks, and a CLI.
