@@ -10,3 +10,5 @@ venv/
 *.db
 *.sqlite
 evidence.json
+
+media/walkthrough.mp4

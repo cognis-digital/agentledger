@@ -57,7 +57,15 @@ class Recorder:
 
     def record_outcome(self, ref_seq: int, actor: str, status: str,
                        detail: Optional[dict] = None) -> Entry:
-        """Record what happened when an agent acted on a directive."""
+        """Record what happened when an agent acted on a directive.
+
+        `ref_seq` must name an entry that already exists; recording an outcome
+        against a directive that was never submitted would leave a dangling
+        reference in the evidence, so it raises instead.
+        """
+        if self.ledger.get(ref_seq) is None:
+            raise ValueError(
+                f"cannot record outcome: no directive with seq {ref_seq}")
         return self.ledger.append("outcome", actor, status, detail or {}, ref=ref_seq)
 
     def rotate_key(self, new_signer: Signer, actor: str = "operator") -> Entry:

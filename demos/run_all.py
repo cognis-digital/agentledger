@@ -18,6 +18,21 @@ SCENARIOS = [
     "03_offline_evidence_bundle",
     "04_key_rotation_and_pqc",
     "05_threshold_and_siem",
+    "06_denied_directive_trail",
+    "07_persistent_ledger",
+    "08_external_doctrine_gate",
+    "09_hmac_offline_only",
+    "10_outcome_correlation",
+    "11_jsonl_siem_feed",
+    "12_tamper_after_export",
+    "13_hybrid_pqc_migration",
+    "14_approval_allowlist",
+    "15_multi_agent_pipeline",
+    "16_independent_verifier",
+    "17_key_compromise_response",
+    "18_callable_sink_alerting",
+    "19_cross_algorithm_audit",
+    "20_cli_walkthrough",
 ]
 
 
