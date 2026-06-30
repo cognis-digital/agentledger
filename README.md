@@ -20,6 +20,15 @@ The hard question in production AI was never "does the model hallucinate." It's 
 - **Offline evidence bundles.** Export the whole history to one JSON file a third party can validate with no database and no call back to any vendor.
 - **Framework-agnostic and dependency-light.** It knows nothing about how your agents run. Pure standard library, with Ed25519 as an optional extra.
 
+
+## Watch the walkthrough
+
+A full narrated tour — setup, the tool in action, and every demo scenario:
+
+[![Watch the agentledger walkthrough](media/walkthrough-thumb.png)](https://github.com/cognis-digital/agentledger/releases/download/walkthrough-v1/walkthrough.mp4)
+
+▶ **[Watch the walkthrough (MP4)](https://github.com/cognis-digital/agentledger/releases/download/walkthrough-v1/walkthrough.mp4)**
+
 ## Install
 
 ```bash
