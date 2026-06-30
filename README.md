@@ -178,19 +178,22 @@ Sinks are best-effort and isolated: a flaky collector can never block or break t
 
 ## Demos
 
-Five runnable scenarios in [`demos/`](demos/), each aimed at a different audience and using the real public API — no network, narrated output, exit 0. Full descriptions in [`docs/DEMOS.md`](docs/DEMOS.md).
+Twenty runnable scenarios in [`demos/`](demos/), each aimed at a different audience and using the real public API — no network, narrated output, exit 0. Full descriptions in [`docs/DEMOS.md`](docs/DEMOS.md).
 
 ```bash
-python demos/run_all.py        # all five, end to end
+python demos/run_all.py        # all twenty, end to end
 ```
+
+A few of them (full table in [`docs/DEMOS.md`](docs/DEMOS.md)):
 
 | # | Demo | Audience | What it shows |
 |---|------|----------|---------------|
 | 1 | [`01_agent_flight_recorder.py`](demos/01_agent_flight_recorder.py) | AI-agent builders | Gate a directive, run the agent on allow, record the outcome — and record the denied directive too. |
-| 2 | [`02_tamper_evident_audit.py`](demos/02_tamper_evident_audit.py) | Security & compliance | Edit one row in SQLite and watch `verify()` catch it and point at the exact sequence. |
 | 3 | [`03_offline_evidence_bundle.py`](demos/03_offline_evidence_bundle.py) | Auditors / regulators | Export a bundle, verify it offline with no key and no network, then catch a single edited field. |
-| 4 | [`04_key_rotation_and_pqc.py`](demos/04_key_rotation_and_pqc.py) | Platform & security engineers | Rotate Ed25519 → post-quantum ML-DSA-65 in place; an unauthorized key is rejected by continuity. |
-| 5 | [`05_threshold_and_siem.py`](demos/05_threshold_and_siem.py) | SRE / platform ops | Require m-of-n distinct operator approvals while forwarding the feed to a SIEM sink in real time. |
+| 12 | [`12_tamper_after_export.py`](demos/12_tamper_after_export.py) | Auditors | Every category of bundle tampering — edit, delete, reorder, insert, flip a signature, hand it garbage — each rejected without crashing. |
+| 16 | [`16_independent_verifier.py`](demos/16_independent_verifier.py) | Regulators who won't install your software | A verifier re-implemented from scratch with only the stdlib + the public Ed25519 primitive. |
+| 19 | [`19_cross_algorithm_audit.py`](demos/19_cross_algorithm_audit.py) | Long-lived audit | One bundle spanning multiple signature algorithms across rotations still verifies offline (a verifier chosen *per entry*). |
+| 20 | [`20_cli_walkthrough.py`](demos/20_cli_walkthrough.py) | Shell / CI users | The full lifecycle driven through the `agentledger` CLI: keygen → submit → outcome → rotate → verify → export → verify-bundle. |
 
 ## Composition
 
@@ -200,7 +203,7 @@ python demos/run_all.py        # all five, end to end
 
 ```bash
 pip install -e ".[dev]"
-pytest -q          # 52 tests
+pytest -q          # 200+ tests (chain, signatures, tamper, rotation, bundles, CLI, sinks)
 ```
 
 ## License

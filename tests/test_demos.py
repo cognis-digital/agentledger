@@ -12,13 +12,8 @@ import pytest
 DEMOS_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "demos")
 sys.path.insert(0, DEMOS_DIR)
 
-SCENARIOS = [
-    "01_agent_flight_recorder",
-    "02_tamper_evident_audit",
-    "03_offline_evidence_bundle",
-    "04_key_rotation_and_pqc",
-    "05_threshold_and_siem",
-]
+# the canonical list lives in run_all.py; sourcing it here keeps the two in sync
+SCENARIOS = importlib.import_module("run_all").SCENARIOS
 
 
 @pytest.mark.parametrize("name", SCENARIOS)
@@ -29,6 +24,15 @@ def test_demo_runs(name, capsys):
     assert "verify" in out.lower()
 
 
-def test_run_all_lists_every_scenario():
-    run_all = importlib.import_module("run_all")
-    assert run_all.SCENARIOS == SCENARIOS
+def test_demo_files_match_scenarios():
+    # every listed scenario has a matching file, and vice versa
+    on_disk = {f[:-3] for f in os.listdir(DEMOS_DIR)
+               if f[0].isdigit() and f.endswith(".py")}
+    assert set(SCENARIOS) == on_disk
+
+
+def test_every_demo_exits_cleanly(capsys):
+    # smoke: importing+running each main() must not raise
+    for name in SCENARIOS:
+        importlib.import_module(name).main()
+        capsys.readouterr()

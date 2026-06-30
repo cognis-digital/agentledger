@@ -105,6 +105,30 @@ class Ledger:
     def append(self, kind: str, actor: str, action: str, params: dict,
                decision: Optional[dict] = None, ref: Optional[int] = None,
                *, ts: Optional[float] = None) -> Entry:
+        # Validate up front with clear errors so a bad write never lands a
+        # partial/garbage row in the signed chain.
+        if not isinstance(kind, str) or not kind:
+            raise ValueError("kind must be a non-empty string")
+        if not isinstance(actor, str) or not actor:
+            raise ValueError("actor must be a non-empty string")
+        if not isinstance(action, str) or not action:
+            raise ValueError("action must be a non-empty string")
+        if params is None:
+            params = {}
+        if not isinstance(params, dict):
+            raise TypeError(f"params must be a dict, got {type(params).__name__}")
+        if decision is not None and not isinstance(decision, dict):
+            raise TypeError(f"decision must be a dict or None, got {type(decision).__name__}")
+        if ref is not None and not isinstance(ref, int):
+            raise TypeError(f"ref must be an int seq or None, got {type(ref).__name__}")
+        # params/decision must canonicalize to JSON; fail clearly *before* we
+        # compute any hash or insert, rather than mid-INSERT with a bare error.
+        try:
+            json.dumps(params, sort_keys=True)
+            json.dumps(decision or {}, sort_keys=True)
+        except TypeError as e:
+            raise TypeError(
+                f"params/decision must be JSON-serializable: {e}") from e
         ts = time.time() if ts is None else ts
         prev_hash = self._last_hash()
         row = self.conn.execute("SELECT COALESCE(MAX(seq),0) FROM entries").fetchone()
