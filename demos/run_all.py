@@ -18,6 +18,10 @@ SCENARIOS = [
     "03_offline_evidence_bundle",
     "04_key_rotation_and_pqc",
     "05_threshold_and_siem",
+    "06_query_the_ledger",
+    "07_merkle_inclusion_proof",
+    "08_exporters_for_tooling",
+    "09_retention_and_checkpoint",
 ]
 
 
