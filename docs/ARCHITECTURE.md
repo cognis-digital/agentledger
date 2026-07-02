@@ -148,3 +148,42 @@ single table, chained to the one before it.
 - **Quantum-aware.** ML-DSA-65 and the hybrid mode ship today, so records signed
   now can stay verifiable against a future quantum adversary ("harvest now,
   verify later").
+
+## Reading, proving, exporting, archiving (v0.2)
+
+The signed chain is the core; everything below is *additive* and never mutates
+it. Each module is standard-library only and offline-verifiable.
+
+- **`query.py` — read-only views.** `Query` is a chainable filter over
+  `Entry` objects (by kind/actor/action/time-window/allowed-denied/rule, plus a
+  `where` escape hatch). It materializes the source once so a query is reusable
+  and never consumes or edits the ledger. Terminals: `all`, `seqs`, `count`,
+  `first`, `latest`, `summary`.
+- **`merkle.py` — single-entry proofs.** A blake2b Merkle tree over each entry's
+  `entry_hash`, with 0x00/0x01 leaf/node domain separation (second-preimage
+  safe). `prove(seq)` yields an O(log n) `InclusionProof`; `verify_proof`
+  recomputes the root and compares it (constant-time) against a root you trust
+  out-of-band — you can prove one entry belongs to a committed ledger without
+  disclosing the others.
+- **`exporters.py` — tool-facing projections.** Lossy views on top of the
+  canonical evidence bundle: SARIF 2.1.0 (denied directives → `error` results,
+  clean run → empty `results` for a passing CI gate), OpenTelemetry OTLP/JSON
+  spans (a directive + its outcomes = one trace, denials → ERROR status),
+  CSV/JSONL, and a signed, self-contained HTML attestation whose embedded
+  signature over (head hash + count + timestamp) is re-checkable with
+  `verify_html_attestation`.
+- **`retention.py` — seal without losing the proof.** `RetentionPolicy`
+  (`keep_last` or `max_age_seconds`) selects a contiguous *prefix* to archive.
+  `seal_segment` exports that prefix as a signed evidence bundle and returns a
+  signed `Checkpoint` committing to the archived head hash + Merkle root. The
+  live chain is never truncated (that would orphan `prev_hash` links); sealing is
+  export + attest, so a single archived entry stays provable against the
+  checkpoint root even after it leaves hot storage.
+- **New sinks (`sinks.py`).** `SplunkHecSink` (HEC envelope + token auth),
+  `ElasticSink` (`_bulk` NDJSON, `entry_hash` as `_id` for idempotent ingest),
+  and `SignedWebhookSink` (HMAC-SHA256 `sha256=` signature header, GitHub/Stripe
+  style). All three accept an injectable `transport`, so their exact wire output
+  is asserted offline in the test suite with no network.
+- **`verify --strict`.** A CI gate: exit 0 only if the chain is intact **and**
+  no denied directive is on record — turning the ledger into a fail-the-build
+  signal for both tamper and policy violations.

@@ -24,12 +24,25 @@ from .signing import (
 from .policy import Decision, PolicyGate
 from .ledger import Entry, Ledger
 from .recorder import ApprovalStatus, Recorder
-from .sinks import Sink, JSONLinesSink, CallableSink, SyslogSink, HttpSink
+from .sinks import (
+    Sink, JSONLinesSink, CallableSink, SyslogSink, HttpSink,
+    SplunkHecSink, ElasticSink, SignedWebhookSink,
+)
+from .query import Query
+from .merkle import MerkleTree, InclusionProof, ProofStep, verify_proof
+from .retention import (
+    RetentionPolicy, Checkpoint, SealResult, seal_segment, verify_checkpoint,
+)
+from . import exporters
 
-__version__ = "0.1.0"
+__version__ = "0.2.0"
 __all__ = [
     "Recorder", "ApprovalStatus", "Ledger", "Entry", "PolicyGate", "Decision",
     "Signer", "Verifier", "new_signer", "signer_from", "save_key", "load_key",
     "Sink", "JSONLinesSink", "CallableSink", "SyslogSink", "HttpSink",
+    "SplunkHecSink", "ElasticSink", "SignedWebhookSink",
+    "Query", "MerkleTree", "InclusionProof", "ProofStep", "verify_proof",
+    "RetentionPolicy", "Checkpoint", "SealResult", "seal_segment",
+    "verify_checkpoint", "exporters",
     "__version__",
 ]

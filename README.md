@@ -167,12 +167,72 @@ rec = Recorder(sinks=[
 
 Sinks are best-effort and isolated: a flaky collector can never block or break the recording of a signed entry — the ledger stays the source of truth.
 
-## Demos
+Purpose-built collector sinks ship too — each accepts an injectable transport so its exact wire output is verified offline in the test suite:
 
-Five runnable scenarios in [`demos/`](demos/), each aimed at a different audience and using the real public API — no network, narrated output, exit 0. Full descriptions in [`docs/DEMOS.md`](docs/DEMOS.md).
+```python
+from agentledger import SplunkHecSink, ElasticSink, SignedWebhookSink
+
+rec = Recorder(sinks=[
+    SplunkHecSink("https://hec:8088/services/collector", token="…", index="agents"),
+    ElasticSink("https://es:9200", index="agentledger"),   # idempotent _bulk (entry_hash as _id)
+    SignedWebhookSink("https://hook.example/agent", secret=b"…"),  # HMAC-signed body, GitHub-style
+])
+```
+
+## Querying, proofs, exporters, and retention
+
+Integrity tells you the record wasn't altered; these additive tools let you *read, prove, export, and archive* it.
+
+**Query** — a chainable, read-only view (never mutates the chain):
+
+```python
+from agentledger.query import Query
+denied = Query(rec.ledger).kind("directive").denied().since(t0).all()
+summary = Query(rec.ledger).summary()   # counts by kind, allowed/denied, distinct actors
+```
+
+**Merkle inclusion proofs** — prove a *single* entry belongs to a committed ledger without revealing the others:
+
+```python
+from agentledger.merkle import MerkleTree, verify_proof
+tree = MerkleTree.from_ledger(rec.ledger)
+proof = tree.prove(seq=3)               # O(log n) proof, not the whole ledger
+verify_proof(proof, expected_root=tree.root())   # -> True
+```
+
+**Exporters** — tool-facing projections on top of the canonical bundle:
+
+```python
+from agentledger import exporters
+exporters.to_sarif(rec.entries(), "out.sarif")       # denied directives as SARIF 2.1.0 results (CI gate)
+exporters.to_otel_spans(rec.entries(), "spans.json") # OpenTelemetry OTLP/JSON (directive+outcomes = a trace)
+exporters.to_csv(rec.entries(), "ledger.csv")        # flat triage table
+exporters.to_jsonl(rec.entries(), "ledger.jsonl")    # one entry per line
+html = exporters.to_html_report(rec.entries(), rec.signer)  # signed, self-contained attestation
+exporters.verify_html_attestation(html)              # human-readable AND machine-verifiable
+```
+
+**Retention & checkpoints** — seal old history into a signed archive without breaking provability:
+
+```python
+from agentledger import RetentionPolicy, seal_segment, verify_checkpoint
+res = seal_segment(rec.ledger, rec.signer, RetentionPolicy(keep_last=1000),
+                   archive_path="archive.json")
+verify_checkpoint(res.checkpoint)   # signed anchor over (archived head hash + Merkle root)
+```
+
+**`verify --strict`** — a CI gate that fails the build on any tamper *or* any denied directive on record:
 
 ```bash
-python demos/run_all.py        # all five, end to end
+agentledger verify --ledger l.db --strict   # exit 0 only if intact AND no denials
+```
+
+## Demos
+
+Nine runnable scenarios in [`demos/`](demos/), each aimed at a different audience and using the real public API — no network, narrated output, exit 0. Full descriptions in [`docs/DEMOS.md`](docs/DEMOS.md).
+
+```bash
+python demos/run_all.py        # all nine, end to end
 ```
 
 | # | Demo | Audience | What it shows |
@@ -182,6 +242,10 @@ python demos/run_all.py        # all five, end to end
 | 3 | [`03_offline_evidence_bundle.py`](demos/03_offline_evidence_bundle.py) | Auditors / regulators | Export a bundle, verify it offline with no key and no network, then catch a single edited field. |
 | 4 | [`04_key_rotation_and_pqc.py`](demos/04_key_rotation_and_pqc.py) | Platform & security engineers | Rotate Ed25519 → post-quantum ML-DSA-65 in place; an unauthorized key is rejected by continuity. |
 | 5 | [`05_threshold_and_siem.py`](demos/05_threshold_and_siem.py) | SRE / platform ops | Require m-of-n distinct operator approvals while forwarding the feed to a SIEM sink in real time. |
+| 6 | [`06_query_the_ledger.py`](demos/06_query_the_ledger.py) | Auditors / on-call | Filter a trusted ledger read-only: every denial, one actor's actions, a directive's outcomes, an aggregate. |
+| 7 | [`07_merkle_inclusion_proof.py`](demos/07_merkle_inclusion_proof.py) | Compliance / privacy | Publish one Merkle root, then prove a single entry's inclusion without disclosing the others. |
+| 8 | [`08_exporters_for_tooling.py`](demos/08_exporters_for_tooling.py) | Platform / DevSecOps | Project the ledger into SARIF, OpenTelemetry spans, CSV/JSONL, and a signed HTML attestation. |
+| 9 | [`09_retention_and_checkpoint.py`](demos/09_retention_and_checkpoint.py) | Data governance | Seal old history into a signed archive + checkpoint; a single archived entry stays provable. |
 
 ## Composition
 
@@ -191,11 +255,11 @@ python demos/run_all.py        # all five, end to end
 
 ```bash
 pip install -e ".[dev]"
-pytest -q          # 52 tests
+pytest -q          # 101 tests
 ```
 
 ## License
 
 COCL (Cognis Open Collaboration License). © Cognis Digital.
 
-> Status: v0.1 — runnable and tested. Shipped: post-quantum ML-DSA-65 signing, hybrid Ed25519+ML-DSA signatures, persistent keys, key rotation with continuity proofs, threshold m-of-n approval, real-time SIEM/syslog/HTTP sinks, and a CLI.
+> Status: v0.2 — runnable and tested. Shipped: post-quantum ML-DSA-65 signing, hybrid Ed25519+ML-DSA signatures, persistent keys, key rotation with continuity proofs, threshold m-of-n approval, real-time SIEM/syslog/HTTP sinks, Splunk HEC / Elastic / signed-webhook sinks, a read-only query API, Merkle single-entry inclusion proofs, SARIF / OpenTelemetry / CSV / JSONL / signed-HTML exporters, retention sealing with signed checkpoints, a `verify --strict` CI gate, and a CLI.

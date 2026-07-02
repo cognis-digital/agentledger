@@ -5,9 +5,16 @@
                         --ledger l.db --key agent.key
     agentledger outcome --ref 1 --actor agent:deployer --status success --ledger l.db --key agent.key
     agentledger rotate  --algorithm hybrid --out new.key --ledger l.db --key agent.key
-    agentledger verify  --ledger l.db [--key agent.key]
+    agentledger verify  --ledger l.db [--key agent.key] [--strict]
     agentledger export  --ledger l.db --out bundle.json [--key agent.key]
     agentledger verify-bundle bundle.json [--secret <hex>]
+    agentledger query   --ledger l.db [--kind directive --denied --summary ...]
+    agentledger prove   --ledger l.db --seq 3 --out proof.json
+    agentledger verify-proof proof.json [--root <hex>]
+    agentledger seal    --ledger l.db --key agent.key --keep-last 1000 \
+                        --archive archive.json --checkpoint cp.json
+    agentledger verify-checkpoint cp.json [--secret <hex>]
+    agentledger export-format --ledger l.db --format sarif --out out.sarif
 
 Asymmetric ledgers (ed25519 / ml-dsa / hybrid) verify with no key, since each
 entry carries its public key. HMAC ledgers need --key (the shared secret).
@@ -20,10 +27,13 @@ import json
 import sys
 from typing import Optional
 
-from . import __version__
+from . import __version__, exporters
 from .evidence import verify_bundle
+from .merkle import InclusionProof, MerkleTree, verify_proof
 from .policy import PolicyGate
+from .query import Query
 from .recorder import Recorder
+from .retention import Checkpoint, RetentionPolicy, seal_segment, verify_checkpoint
 from .signing import load_key, new_signer, save_key
 
 
@@ -110,8 +120,130 @@ def cmd_approvals(args) -> int:
 def cmd_verify(args) -> int:
     rec = _recorder(args)
     ok, broken = rec.verify()
-    _print({"intact": ok, "first_broken_seq": broken, "entries": len(rec.entries())})
+    entries = rec.entries()
+    result = {"intact": ok, "first_broken_seq": broken, "entries": len(entries)}
+    # --strict: a CI gate. The chain must be intact AND there must be no denied
+    # directive on record. This turns the ledger into a fail-the-build signal:
+    # any tamper OR any policy violation exits non-zero.
+    if getattr(args, "strict", False):
+        denied = [e.seq for e in entries
+                  if e.kind == "directive" and e.decision.get("allowed") is False]
+        result["strict"] = True
+        result["denied_directives"] = denied
+        result["passed"] = ok and not denied
+        _print(result)
+        return 0 if (ok and not denied) else 1
+    _print(result)
     return 0 if ok else 1
+
+
+def cmd_query(args) -> int:
+    rec = _recorder(args)
+    q = Query(rec.ledger)
+    if args.kind:
+        q = q.kind(*args.kind)
+    if args.actor:
+        q = q.actor(*args.actor)
+    if args.action:
+        q = q.action(*args.action)
+    if args.ref is not None:
+        q = q.refers_to(args.ref)
+    if args.since is not None:
+        q = q.since(args.since)
+    if args.until is not None:
+        q = q.until(args.until)
+    if args.allowed:
+        q = q.allowed()
+    if args.denied:
+        q = q.denied()
+    if args.rule:
+        q = q.rule(*args.rule)
+    q = q.order_by_ts()
+    if args.limit is not None:
+        q = q.limit(args.limit)
+    if args.summary:
+        _print(q.summary())
+    else:
+        _print([{"seq": e.seq, "ts": e.ts, "kind": e.kind, "actor": e.actor,
+                 "action": e.action, "allowed": e.decision.get("allowed"),
+                 "rule": e.decision.get("rule"), "ref": e.ref,
+                 "entry_hash": e.entry_hash} for e in q])
+    return 0
+
+
+def cmd_prove(args) -> int:
+    rec = _recorder(args)
+    tree = MerkleTree.from_ledger(rec.ledger)
+    proof = tree.prove(args.seq)
+    if args.out:
+        with open(args.out, "w", encoding="utf-8") as fh:
+            json.dump(proof.as_dict(), fh, indent=2)
+    _print({"seq": proof.seq, "root": proof.root, "tree_size": proof.tree_size,
+            "proof_steps": len(proof.steps),
+            "out": args.out if args.out else None})
+    return 0
+
+
+def cmd_verify_proof(args) -> int:
+    with open(args.proof, "r", encoding="utf-8") as fh:
+        proof = InclusionProof.from_dict(json.load(fh))
+    ok = verify_proof(proof, expected_root=args.root)
+    _print({"included": ok, "seq": proof.seq,
+            "root": args.root or proof.root, "tree_size": proof.tree_size})
+    return 0 if ok else 1
+
+
+def cmd_seal(args) -> int:
+    rec = _recorder(args)
+    if args.keep_last is not None:
+        policy = RetentionPolicy(keep_last=args.keep_last)
+    elif args.max_age is not None:
+        policy = RetentionPolicy(max_age_seconds=args.max_age)
+    else:
+        raise SystemExit("seal requires --keep-last or --max-age")
+    result = seal_segment(rec.ledger, rec.signer, policy, archive_path=args.archive)
+    if result is None:
+        _print({"sealed": 0, "note": "nothing eligible under this policy"})
+        return 0
+    cp = result.checkpoint
+    if args.checkpoint:
+        with open(args.checkpoint, "w", encoding="utf-8") as fh:
+            json.dump(cp.as_dict(), fh, indent=2)
+    _print({"sealed": cp.entry_count,
+            "segment": [cp.segment_start_seq, cp.segment_end_seq],
+            "archived_head_hash": cp.archived_head_hash,
+            "merkle_root": cp.merkle_root,
+            "archive": args.archive, "checkpoint": args.checkpoint})
+    return 0
+
+
+def cmd_verify_checkpoint(args) -> int:
+    with open(args.checkpoint, "r", encoding="utf-8") as fh:
+        cp = Checkpoint.from_dict(json.load(fh))
+    secret = bytes.fromhex(args.secret) if args.secret else None
+    ok = verify_checkpoint(cp, secret=secret)
+    _print({"valid": ok, "segment": [cp.segment_start_seq, cp.segment_end_seq],
+            "entry_count": cp.entry_count, "merkle_root": cp.merkle_root})
+    return 0 if ok else 1
+
+
+def cmd_export_format(args) -> int:
+    rec = _recorder(args)
+    fmt = args.format
+    if fmt == "jsonl":
+        exporters.to_jsonl(rec.entries(), args.out)
+    elif fmt == "csv":
+        exporters.to_csv(rec.entries(), args.out)
+    elif fmt == "sarif":
+        exporters.to_sarif(rec.entries(), args.out, tool_version=__version__)
+    elif fmt == "otel":
+        exporters.to_otel_spans(rec.entries(), args.out)
+    elif fmt == "html":
+        exporters.to_html_report(rec.entries(), rec.signer, args.out)
+    else:  # pragma: no cover - argparse choices guard this
+        raise SystemExit(f"unknown format {fmt}")
+    _print({"format": fmt, "out": args.out, "entries": len(rec.entries())})
+    return 0
 
 
 def cmd_export(args) -> int:
@@ -190,7 +322,61 @@ def build_parser() -> argparse.ArgumentParser:
     pv = sub.add_parser("verify", help="verify the ledger (chain + signatures + continuity)")
     pv.add_argument("--ledger", required=True)
     pv.add_argument("--key", default=None)
+    pv.add_argument("--strict", action="store_true",
+                    help="CI gate: also fail if any denied directive is on record")
     pv.set_defaults(func=cmd_verify)
+
+    pq = sub.add_parser("query", help="filter/summarize ledger entries (read-only)")
+    pq.add_argument("--ledger", required=True)
+    pq.add_argument("--key", default=None)
+    pq.add_argument("--kind", action="append", help="directive|outcome|approval|key_rotation (repeatable)")
+    pq.add_argument("--actor", action="append")
+    pq.add_argument("--action", action="append")
+    pq.add_argument("--ref", type=int, default=None, help="entries referencing this seq")
+    pq.add_argument("--since", type=float, default=None, help="unix ts lower bound")
+    pq.add_argument("--until", type=float, default=None, help="unix ts upper bound")
+    pq.add_argument("--allowed", action="store_true")
+    pq.add_argument("--denied", action="store_true")
+    pq.add_argument("--rule", action="append", help="policy rule name (repeatable)")
+    pq.add_argument("--limit", type=int, default=None)
+    pq.add_argument("--summary", action="store_true", help="print an aggregate instead of rows")
+    pq.set_defaults(func=cmd_query)
+
+    pp = sub.add_parser("prove", help="build a Merkle inclusion proof for one entry")
+    pp.add_argument("--ledger", required=True)
+    pp.add_argument("--key", default=None)
+    pp.add_argument("--seq", type=int, required=True)
+    pp.add_argument("--out", default=None, help="write the proof JSON here")
+    pp.set_defaults(func=cmd_prove)
+
+    pvp = sub.add_parser("verify-proof", help="verify a Merkle inclusion proof")
+    pvp.add_argument("proof", help="proof JSON file")
+    pvp.add_argument("--root", default=None, help="expected root (hex); else use the proof's own")
+    pvp.set_defaults(func=cmd_verify_proof)
+
+    psl = sub.add_parser("seal", help="seal an eligible prefix into a signed archive + checkpoint")
+    psl.add_argument("--ledger", required=True)
+    psl.add_argument("--key", required=True)
+    psl.add_argument("--keep-last", dest="keep_last", type=int, default=None,
+                     help="keep the newest N live, seal the rest")
+    psl.add_argument("--max-age", dest="max_age", type=float, default=None,
+                     help="seal entries older than this many seconds")
+    psl.add_argument("--archive", default=None, help="write the evidence bundle here")
+    psl.add_argument("--checkpoint", default=None, help="write the signed checkpoint here")
+    psl.set_defaults(func=cmd_seal)
+
+    pvc = sub.add_parser("verify-checkpoint", help="verify a sealed-segment checkpoint")
+    pvc.add_argument("checkpoint", help="checkpoint JSON file")
+    pvc.add_argument("--secret", default=None, help="hex HMAC secret (HMAC checkpoints only)")
+    pvc.set_defaults(func=cmd_verify_checkpoint)
+
+    pef = sub.add_parser("export-format", help="export to sarif|otel|csv|jsonl|html")
+    pef.add_argument("--ledger", required=True)
+    pef.add_argument("--key", default=None)
+    pef.add_argument("--format", required=True,
+                     choices=["jsonl", "csv", "sarif", "otel", "html"])
+    pef.add_argument("--out", required=True)
+    pef.set_defaults(func=cmd_export_format)
 
     pe = sub.add_parser("export", help="export an offline-verifiable evidence bundle")
     pe.add_argument("--ledger", required=True)
